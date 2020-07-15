@@ -1,0 +1,159 @@
+---
+title: "CO2 emission-Timeseries"
+author: "AM"
+#date: "6/6/2020"
+output:
+  html_document: default
+  toc_depth: TRUE
+---
+## TIME SERIES ANALYSIS OF CO2 EMISSIONS
+
+### Data source
+
+For the time series analysis, I would be using the CO2 emissions data from the following URL: https://www.itl.nist.gov/div898/handbook/datasets/MLCO2MON.DAT
+
+#### Loading packages
+
+```{r}
+#install.packages("timeSeries")
+#install.packages("stats")
+library(stats)
+library(timeSeries)
+library(ggplot2)
+#install.packages("forecast")
+library(forecast)
+#emission <- scan("https://www.itl.nist.gov/div898/handbook/datasets/MLCO2MON.DAT", skip = 25)
+emission <- read.table("MLCO2MON.DAT")
+colnames(emission)<-c("CO2","Year & Month", "Year", "Month")
+summary(emission)
+#str(emission)
+dim(emission)
+head(emission)
+```
+Lets understand the structure of the dataset
+```{r}
+str(emission)
+```
+As we can see the variables are numeric or integer so no need to change the type.
+
+Next step is to analyze the CO2 emission as a time function.
+
+```{r}
+ggplot(emission, aes(x = `Year & Month`,y = CO2))+geom_line()
+```
+From the time series plot, it is clear that there is an upward increase in CO2 emissions (trend), periodicity (also called seasonality) and local fluctuations (noise). 
+
+
+Now its time to create time series using 'ts()' function from timeSeries package.
+```{r}
+emission_timeseries <- ts(emission$CO2, start = c(1974,5),end = c(1987,9), frequency = 12)
+plot.ts(emission_timeseries)
+head(emission_timeseries)
+```
+
+
+Next step is to decouple the above curve into the three principle components: trend, seasonality, and noise using decompose() function and plot it.
+
+```{r}
+
+emission_components <- decompose(emission_timeseries)
+plot(emission_components)
+```
+
+## Model testing
+
+Lets try forecasting using different models and compare them.
+
+### 1. Simple exponential smoothing
+HoltWinters() function use exponential function for forecasting short term. It has three parameters for adjusting: alpha, beta, gamma. The value of the 3 parameters lie between 0 and 1. Closer to 1 means the weights of the recent values are more than older values.
+
+*__Case 1:__ alpha = TRUE, beta = FALSE, gamma = FALSE*: useful when data lacks trend and seasonality.
+
+*__Case 2:__ alpha = TRUE, beta = TRUE, gamma = FALSE*: useful when data shows trend and lack seasonality.
+
+*__Case 3:__ alpha = TRUE, beta = TRUE, gamma = TRUE*: useful when data shows both trend and seasonality.
+
+For our example of CO2 emissions, we will be using **case 3** as the data shows both trend and seasonality.
+
+Before actually starting to forecast, let fit the HoltWinters model to the CO2 emissions data.
+```{r}
+emission_fit <- HoltWinters(emission_timeseries)
+emission_fit
+```
+# EXPLAIN THE COEFFICIENTS???
+
+```{r}
+plot(emission_fit)
+legend(345, 1976, legend = c("observed","fitted"), col = c("black", "red"))
+```
+
+The red curve is the fitted one showing good agreement. Looking at the values of the three parameters, we can roughly say that the values of alpha and gamma are more inclined towards recent data while that of beta is wore weighed towards historical data.
+
+Let us now look at the fitting of HoltWinters curve. This can be done by calculating the **sum of squared errors** or **SSE**, which is already stored in the emission_fit variable as shown below. 
+
+
+```{r}
+emission_fit$SSE
+```
+For a curve to fit perfectly, the SSE should be equal to 0, the above value shows a very good agreement between the observed and fitted curve.
+
+Now we will be using forecast() package to forecast the CO2 emissions for next 10 years. The input variable for forecast will be the one that was generated after fitting the HoltWinters model (in our case it is emission_fit). We will define the number of periods to be forecasted as h = 120.
+
+```{r}
+emission_forecast <- forecast:::forecast.HoltWinters(emission_fit, h = 120)
+#emission_forecast <- hw(emission_fit, h = 1000)
+plot(forecast(emission_forecast))
+```
+
+ACF testing
+
+```{r}
+acf(x = emission_forecast$residuals, lag.max = 20, na.action = na.pass)
+
+Box.test(emission_forecast$residuals, lag =20 , type="Ljung-Box")
+#plot.ts(emission_forecast$residuals)
+forecast_error <- data.frame(emission_forecast$residuals)
+#forecast_error
+str(forecast_error)
+#hist(forecast_error)
+#ggplot(data = forecast_error, aes(x=forecast_error))+geom_histogram(bin = 5)
+```
+
+The p-value of Ljung test from the Box.test() function clearly tells little evidence of non-zero auto-correlations for the in-sample forecast error for 20 lags. 
+
+The next step is to now check if the forecasting can be further improved. If the current model is performing well then the residual or the forecast error should have zero mean with constant variance and it should be normally distributed. Lets analyze the residual data (emission_forecast$residuals).
+
+```{r}
+str(emission_forecast$residuals)
+#emission_forecast$residuals
+residuals_em = as.integer(emission_forecast$residuals)
+#ggplot(data = residuals_em, aes(x=residuals_em))+geom_histogram(bin = 10)
+summary(emission_forecast$residuals)
+autoplot(emission_forecast$residuals)
+```
+
+ggseasonplot
+
+```{r}
+ggseasonplot(emission_timeseries)
+ggseasonplot(emission_timeseries, polar = TRUE)
+```
+
+ggsubseriesplot
+
+```{r}
+ggsubseriesplot(emission_timeseries)
+
+# another alternative is ggmonthplot()
+#ggmonthplot(emission_timeseries)
+gghistogram(emission_forecast$residuals, add.normal = TRUE)
+```
+
+checkresiduals function
+
+One line function to plot ACF, residuals and histogram with normal distribution
+
+```{r}
+checkresiduals(emission_forecast)
+```
+
